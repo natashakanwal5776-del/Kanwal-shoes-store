@@ -1,0 +1,33 @@
+name: Supabase Project Keep-Alive
+
+on:
+  schedule:
+    # Runs every 3 days at midnight UTC to prevent Supabase free tier from pausing
+    - cron: '0 0 */3 * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  ping:
+    name: Ping Supabase Database
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send lightweight ping request to Supabase
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_ANON_KEY secret is not set. Please set them in Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/products?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "Response code: $HTTP_CODE"
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Supabase keep-alive ping succeeded! Database is active."
+          else
+            echo "::warning::Received HTTP status $HTTP_CODE from Supabase: $BODY"
+          fi

@@ -1,4 +1,5 @@
-/* Kanwal Shoes Store - shared data, storage, shoe artwork, size check */
+/* Kanwal Shoes Store - shared data, size checking, shoe artwork & Supabase data adapter */
+
 const STORE = {
   name: "Kanwal Shoes Store",
   nameUr: "کنول شوز اسٹور",
@@ -7,24 +8,26 @@ const STORE = {
   email: "kanwalshoesstore2026@gmail.com",
   address: "CRBC Chowk, D.I. Khan",
   addressUr: "سی آر بی سی چوک، ڈیرہ اسماعیل خان",
-  adminPassword: "kanwal2026", // change this
   delivery: 250,
   freeOver: 5000,
   currency: "Rs."
 };
-const RANGES = { women: [35, 42], men: [39, 46], kids: [18, 34] };
-const TYPES = ["sneaker", "heel", "sandal", "boot", "loafer"];
-/* ---------- storage ---------- */
-const db = {
-  get(k, d) { try { const v = localStorage.getItem("ks_" + k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
-  set(k, v) { localStorage.setItem("ks_" + k, JSON.stringify(v)); }
+
+const RANGES = {
+  women: [35, 42],
+  men: [39, 46],
+  kids: [18, 34]
 };
-/* ---------- shoe artwork (SVG, any colour) ---------- */
+
+const TYPES = ["sneaker", "heel", "sandal", "boot", "loafer"];
+
+/* ---------- shoe artwork (SVG fallback when photo is loading/absent) ---------- */
 function shade(hex, amt) {
   const n = parseInt(hex.slice(1), 16);
   const f = v => Math.max(0, Math.min(255, v + amt));
   return "#" + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(f).map(v => v.toString(16).padStart(2, "0")).join("");
 }
+
 function shoeSVG(type, c, kid) {
   c = /^#[0-9a-f]{6}$/i.test(c || "") ? c : "#B8567A";
   const d = shade(c, -40), l = shade(c, 45);
@@ -54,7 +57,7 @@ function shoeSVG(type, c, kid) {
     <path d="M150 164 C176 160 206 154 232 146 L238 176 C206 184 176 186 150 182Z" fill="${d}"/>
     <rect x="186" y="156" width="26" height="9" rx="3" fill="#C9A15B"/>
     <rect x="40" y="212" width="338" height="20" rx="8" fill="${shade(c, -80)}"/>`;
-  } else { /* sneaker */
+  } else {
     body = `<path d="M38 202 C38 170 52 150 78 146 L128 138 C150 112 178 98 210 96 C226 112 252 128 290 140 C345 156 372 176 372 204 L372 216 L38 216Z" fill="${c}"/>
     <path d="M38 202 C38 170 52 150 78 146 L98 144 L98 208Z" fill="${d}"/>
     <path d="M210 96 C226 112 252 128 290 140 L266 152 C242 142 224 124 210 96Z" fill="${l}" opacity=".7"/>
@@ -67,83 +70,154 @@ function shoeSVG(type, c, kid) {
   }
   return `<svg viewBox="0 0 400 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="shoe">${shadow}${body}</svg>`;
 }
-function tint(c) { return /^#[0-9a-f]{6}$/i.test(c || "") ? c + "2e" : "#f3e6ea"; }
-/* ---------- seed products ---------- */
-const UR_NAMES = {
-  1: "کنول اینکل بوٹ",
-  2: "کنول کلاؤڈ واک اسنیکر",
-  3: "کنول پرل فلیٹ سینڈل",
-  4: "کنول سافٹ بیلے لوفر",
-  7: "کنول لیدر اینکل بوٹ",
-  8: "کنول کراس اسٹریپ سینڈل",
-  9: "کنول پشاوری چپل سینڈل",
-  10: "کنول رنر اسپورٹس اسنیکر",
-  13: "کنول کڈز ایرو اسپورٹس اسنیکر",
-  14: "کنول کڈز ایکٹو رنر اسنیکر",
-  15: "کنول کڈز فلورل سینڈل",
-  16: "کنول کڈز کیجڈ لیدر سینڈل",
-  17: "کنول کڈز ڈبل بکل سلائیڈ سینڈل"
-};
-function makeSizes(cat, id) {
-  const [a, b] = RANGES[cat], s = {};
-  for (let n = a; n <= b; n++) s[n] = Math.max(2, (n * 7 + id * 3) % 9);
-  return s;
+
+function tint(c) {
+  return /^#[0-9a-f]{6}$/i.test(c || "") ? c + "2e" : "#f3e6ea";
 }
-function seedProducts() {
-  const P = (id, cat, type, name, price, sale, colors, img = "", created = id) =>
-    ({ id, cat, type, name, nameUr: UR_NAMES[id] || "", price, sale, colors, sizes: makeSizes(cat, id), img, created });
+
+/* ---------- data normalization ---------- */
+function normalizeProduct(raw) {
+  if (!raw) return null;
+  const photos = Array.isArray(raw.photos)
+    ? raw.photos.filter(Boolean)
+    : (raw.img ? [raw.img] : []);
+  const colours = Array.isArray(raw.colours)
+    ? raw.colours
+    : (Array.isArray(raw.colors) ? raw.colors : []);
+  const sale = raw.sale_price != null
+    ? Number(raw.sale_price)
+    : (raw.sale != null ? Number(raw.sale) : null);
+
+  return {
+    id: String(raw.id),
+    name: raw.name || "Shoe",
+    nameUr: raw.name_ur || raw.nameUr || raw.name,
+    name_ur: raw.name_ur || raw.nameUr || raw.name,
+    cat: raw.collection || raw.cat || "women",
+    collection: raw.collection || raw.cat || "women",
+    type: raw.type || "sneaker",
+    price: Number(raw.price) || 0,
+    sale: sale && sale > 0 ? sale : 0,
+    sale_price: sale && sale > 0 ? sale : null,
+    colors: colours.length ? colours : [{ n: "Default", c: "#B8567A" }],
+    colours: colours.length ? colours : [{ n: "Default", c: "#B8567A" }],
+    sizes: raw.sizes && typeof raw.sizes === "object" ? raw.sizes : {},
+    photos: photos,
+    img: photos[0] || raw.img || "",
+    video_url: raw.video_url || null,
+    hidden: Boolean(raw.hidden),
+    created: raw.created_at || raw.created || Date.now()
+  };
+}
+
+/* ---------- sample products fallback (if db has not yet seeded) ---------- */
+function getSampleProducts() {
   return [
-    P(1, "women", "boot", "Kanwal Ankle Boot", 5900, 4900, [{ n: "Mocha Brown", c: "#6B4A3A" }, { n: "Black", c: "#2D1B2E" }], "images/women-boot.jpg", 104),
-    P(2, "women", "sneaker", "Kanwal Cloud Walk Sneaker", 4600, 0, [{ n: "Lilac Purple", c: "#9B7AD4" }, { n: "Soft Lavender", c: "#B7A3D6" }, { n: "Pure White", c: "#F5F3F4" }], "images/women-sneaker.jpg", 103),
-    P(3, "women", "sandal", "Kanwal Pearl Flat Sandal", 3400, 2800, [{ n: "Dusty Rose", c: "#C47A8F" }, { n: "Champagne Pink", c: "#D8A5B2" }], "images/women-sandal.jpg", 102),
-    P(4, "women", "loafer", "Kanwal Soft Ballet Loafer", 3800, 0, [{ n: "Blush Pink", c: "#DE9BAE" }, { n: "Rose Nude", c: "#D9A98C" }], "images/women-loafer.jpg", 101),
-    P(7, "men", "boot", "Kanwal Leather Ankle Boot", 6900, 5900, [{ n: "Mocha Brown", c: "#5C3A2A" }, { n: "Midnight Black", c: "#1F1B24" }], "images/men-boot.jpg", 204),
-    P(8, "men", "sandal", "Kanwal Cross-Strap Slide Sandal", 3400, 0, [{ n: "Classic Black", c: "#1F1B24" }, { n: "Charcoal Grey", c: "#4A4A52" }], "images/men-sandal.jpg", 203),
-    P(9, "men", "sandal", "Kanwal Peshawari Chappal Sandal", 3900, 3400, [{ n: "Navy & Brown", c: "#27395E" }, { n: "Rich Walnut", c: "#5C3A2A" }], "images/men-chappal.jpg", 202),
-    P(10, "men", "sneaker", "Kanwal Runner Sports Sneaker", 4900, 0, [{ n: "Navy Blue", c: "#1F2B48" }, { n: "Steel Grey", c: "#6B7280" }], "images/men-sneaker.jpg", 201),
-    P(13, "kids", "sneaker", "Kanwal Kids Aero Sport Sneaker", 2600, 0, [{ n: "Royal Blue & Orange", c: "#274CB5" }, { n: "Neon Lime", c: "#A3D42C" }], "images/kids-sneaker.jpg", 305),
-    P(14, "kids", "sneaker", "Kanwal Kids Active Runner Sneaker", 2500, 2100, [{ n: "Bright Blue & Green", c: "#3472C6" }, { n: "Sunset Orange", c: "#EA6B25" }], "images/kids-runner.jpg", 304),
-    P(15, "kids", "sandal", "Kanwal Kids Floral Charm Sandal", 2200, 0, [{ n: "Soft Blush & Gold", c: "#E2A4B8" }, { n: "Rose Pink", c: "#D58A9F" }], "images/kids-floral-sandal.jpg", 303),
-    P(16, "kids", "sandal", "Kanwal Kids Caged Fisherman Sandal", 2400, 1950, [{ n: "Navy & Tan Brown", c: "#2C3E60" }, { n: "Walnut Brown", c: "#8A5A36" }], "images/kids-caged-sandal.jpg", 302),
-    P(17, "kids", "sandal", "Kanwal Kids Double Buckle Slide Sandal", 2100, 0, [{ n: "Rich Walnut Leather", c: "#533325" }, { n: "Mocha Brown", c: "#6E4532" }], "images/kids-buckle-slide.jpg", 301)
-  ];
+    { id: "00000000-0000-0000-0000-000000000001", cat: "women", type: "boot", name: "Kanwal Ankle Boot", nameUr: "کنول اینکل بوٹ", price: 5900, sale: 4900, colors: [{ n: "Mocha Brown", c: "#6B4A3A" }, { n: "Black", c: "#2D1B2E" }], sizes: { "35": 4, "36": 6, "37": 8, "38": 6, "39": 5, "40": 4, "41": 2, "42": 2 }, photos: ["images/women-boot.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000002", cat: "women", type: "sneaker", name: "Kanwal Cloud Walk Sneaker", nameUr: "کنول کلاؤڈ واک اسنیکر", price: 4600, sale: 0, colors: [{ n: "Lilac Purple", c: "#9B7AD4" }, { n: "Soft Lavender", c: "#B7A3D6" }, { n: "Pure White", c: "#F5F3F4" }], sizes: { "35": 5, "36": 7, "37": 9, "38": 7, "39": 4, "40": 3, "41": 2, "42": 1 }, photos: ["images/women-sneaker.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000003", cat: "women", type: "sandal", name: "Kanwal Pearl Flat Sandal", nameUr: "کنول پرل فلیٹ سینڈل", price: 3400, sale: 2800, colors: [{ n: "Dusty Rose", c: "#C47A8F" }, { n: "Champagne Pink", c: "#D8A5B2" }], sizes: { "35": 3, "36": 5, "37": 7, "38": 6, "39": 4, "40": 3, "41": 2, "42": 1 }, photos: ["images/women-sandal.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000004", cat: "women", type: "loafer", name: "Kanwal Soft Ballet Loafer", nameUr: "کنول سافٹ بیلے لوفر", price: 3800, sale: 0, colors: [{ n: "Blush Pink", c: "#DE9BAE" }, { n: "Rose Nude", c: "#D9A98C" }], sizes: { "35": 4, "36": 6, "37": 8, "38": 5, "39": 3, "40": 3, "41": 2, "42": 1 }, photos: ["images/women-loafer.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000007", cat: "men", type: "boot", name: "Kanwal Leather Ankle Boot", nameUr: "کنول لیدر اینکل بوٹ", price: 6900, sale: 5900, colors: [{ n: "Mocha Brown", c: "#5C3A2A" }, { n: "Midnight Black", c: "#1F1B24" }], sizes: { "39": 4, "40": 6, "41": 8, "42": 7, "43": 5, "44": 4, "45": 3, "46": 2 }, photos: ["images/men-boot.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000008", cat: "men", type: "sandal", name: "Kanwal Cross-Strap Slide Sandal", nameUr: "کنول کراس اسٹریپ سینڈل", price: 3400, sale: 0, colors: [{ n: "Classic Black", c: "#1F1B24" }, { n: "Charcoal Grey", c: "#4A4A52" }], sizes: { "39": 5, "40": 7, "41": 9, "42": 8, "43": 6, "44": 4, "45": 2, "46": 2 }, photos: ["images/men-sandal.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000009", cat: "men", type: "sandal", name: "Kanwal Peshawari Chappal Sandal", nameUr: "کنول پشاوری چپل سینڈل", price: 3900, sale: 3400, colors: [{ n: "Navy & Brown", c: "#27395E" }, { n: "Rich Walnut", c: "#5C3A2A" }], sizes: { "39": 4, "40": 6, "41": 8, "42": 8, "43": 5, "44": 4, "45": 3, "46": 2 }, photos: ["images/men-chappal.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000010", cat: "men", type: "sneaker", name: "Kanwal Runner Sports Sneaker", nameUr: "کنول رنر اسپورٹس اسنیکر", price: 4900, sale: 0, colors: [{ n: "Navy Blue", c: "#1F2B48" }, { n: "Steel Grey", c: "#6B7280" }], sizes: { "39": 6, "40": 8, "41": 10, "42": 8, "43": 6, "44": 4, "45": 3, "46": 2 }, photos: ["images/men-sneaker.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000013", cat: "kids", type: "sneaker", name: "Kanwal Kids Aero Sport Sneaker", nameUr: "کنول کڈز ایرو اسپورٹس اسنیکر", price: 2600, sale: 0, colors: [{ n: "Royal Blue & Orange", c: "#274CB5" }, { n: "Neon Lime", c: "#A3D42C" }], sizes: { "18": 3, "19": 3, "20": 4, "21": 4, "22": 5, "23": 5, "24": 6, "25": 6, "26": 5, "27": 5, "28": 4, "29": 4, "30": 3, "31": 3, "32": 2, "33": 2, "34": 2 }, photos: ["images/kids-sneaker.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000014", cat: "kids", type: "sneaker", name: "Kanwal Kids Active Runner Sneaker", nameUr: "کنول کڈز ایکٹو رنر اسنیکر", price: 2500, sale: 2100, colors: [{ n: "Bright Blue & Green", c: "#3472C6" }, { n: "Sunset Orange", c: "#EA6B25" }], sizes: { "18": 4, "19": 4, "20": 5, "21": 5, "22": 6, "23": 6, "24": 6, "25": 5, "26": 5, "27": 4, "28": 4, "29": 3, "30": 3, "31": 3, "32": 2, "33": 2, "34": 1 }, photos: ["images/kids-runner.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000015", cat: "kids", type: "sandal", name: "Kanwal Kids Floral Charm Sandal", nameUr: "کنول کڈز فلورل سینڈل", price: 2200, sale: 0, colors: [{ n: "Soft Blush & Gold", c: "#E2A4B8" }, { n: "Rose Pink", c: "#D58A9F" }], sizes: { "18": 3, "19": 3, "20": 4, "21": 4, "22": 5, "23": 5, "24": 5, "25": 4, "26": 4, "27": 3, "28": 3, "29": 2, "30": 2, "31": 2, "32": 1, "33": 1, "34": 1 }, photos: ["images/kids-floral-sandal.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000016", cat: "kids", type: "sandal", name: "Kanwal Kids Caged Fisherman Sandal", nameUr: "کنول کڈز کیجڈ لیدر سینڈل", price: 2400, sale: 1950, colors: [{ n: "Navy & Tan Brown", c: "#2C3E60" }, { n: "Walnut Brown", c: "#8A5A36" }], sizes: { "18": 4, "19": 4, "20": 5, "21": 5, "22": 5, "23": 6, "24": 6, "25": 5, "26": 4, "27": 4, "28": 3, "29": 3, "30": 2, "31": 2, "32": 2, "33": 1, "34": 1 }, photos: ["images/kids-caged-sandal.jpg"] },
+    { id: "00000000-0000-0000-0000-000000000017", cat: "kids", type: "sandal", name: "Kanwal Kids Double Buckle Slide Sandal", nameUr: "کنول کڈز ڈبل بکل سلائیڈ سینڈل", price: 2100, sale: 0, colors: [{ n: "Rich Walnut Leather", c: "#533325" }, { n: "Mocha Brown", c: "#6E4532" }], sizes: { "18": 3, "19": 4, "20": 4, "21": 5, "22": 5, "23": 5, "24": 5, "25": 4, "26": 4, "27": 3, "28": 3, "29": 2, "30": 2, "31": 2, "32": 2, "33": 1, "34": 1 }, photos: ["images/kids-buckle-slide.jpg"] }
+  ].map(normalizeProduct);
 }
-const DATA_VERSION = 7;
-function getProducts() {
-  let p = db.get("products", null);
-  const v = db.get("data_v", 0);
-  if (!p || v < DATA_VERSION) {
-    p = seedProducts();
-    db.set("products", p);
-    db.set("data_v", DATA_VERSION);
-    try {
-      const c = db.get("cart", []);
-      if (Array.isArray(c)) {
-        const validIds = new Set(p.map(x => x.id));
-        db.set("cart", c.filter(item => validIds.has(item.pid)));
-      }
-    } catch (e) {}
+
+/* ---------- Supabase Data API ---------- */
+let _cachedProducts = null;
+
+async function fetchProducts(forceRefresh = false) {
+  if (_cachedProducts && !forceRefresh) return _cachedProducts;
+  const sb = getSupabase();
+  if (!sb) {
+    _cachedProducts = getSampleProducts();
+    return _cachedProducts;
   }
-  return p;
+  try {
+    const { data, error } = await sb
+      .from("products")
+      .select("*")
+      .eq("hidden", false)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.warn("Supabase products fetch warning, using fallback:", error.message);
+      _cachedProducts = getSampleProducts();
+      return _cachedProducts;
+    }
+    if (!data || !data.length) {
+      _cachedProducts = getSampleProducts();
+      return _cachedProducts;
+    }
+    _cachedProducts = data.map(normalizeProduct);
+    return _cachedProducts;
+  } catch (err) {
+    console.error("fetchProducts error:", err);
+    _cachedProducts = getSampleProducts();
+    return _cachedProducts;
+  }
 }
-function saveProducts(p) { db.set("products", p); }
-function getOrders() { return db.get("orders", []); }
-function saveOrders(o) { db.set("orders", o); }
-function priceOf(p) { return p.sale && p.sale < p.price ? p.sale : p.price; }
-function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
+
+async function fetchProductById(id) {
+  const sb = getSupabase();
+  if (!sb) {
+    const sample = getSampleProducts().find(p => p.id === String(id));
+    return sample || null;
+  }
+  try {
+    const { data, error } = await sb
+      .from("products")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error || !data) {
+      const sample = getSampleProducts().find(p => p.id === String(id));
+      return sample || null;
+    }
+    return normalizeProduct(data);
+  } catch (err) {
+    const sample = getSampleProducts().find(p => p.id === String(id));
+    return sample || null;
+  }
+}
+
+/* Helper functions */
+function priceOf(p) {
+  return p.sale && p.sale < p.price ? p.sale : p.price;
+}
+
+function totalStock(p) {
+  if (!p || !p.sizes) return 0;
+  return Object.values(p.sizes).reduce((sum, n) => sum + (Number(n) || 0), 0);
+}
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+
 /* ---------- size check (category aware) ---------- */
 function categoryOfSize(n) {
   return Object.keys(RANGES).filter(k => n >= RANGES[k][0] && n <= RANGES[k][1]);
 }
+
 /* returns {state: ok|low|out|other|invalid, stock, other, near} */
 function checkSize(p, raw) {
   const n = Number(raw);
   if (raw === "" || raw == null || !isFinite(n) || n <= 0) return { state: "invalid" };
-  const [a, b] = RANGES[p.cat];
+  const cat = p.cat || p.collection;
+  const [a, b] = RANGES[cat] || [35, 42];
   if (n >= a && n <= b) {
-    const stock = Number(p.sizes[n] || 0);
+    const stock = Number((p.sizes && p.sizes[n]) || 0);
     if (stock <= 0) {
-      const near = Object.keys(p.sizes).map(Number).filter(s => p.sizes[s] > 0)
+      const near = Object.keys(p.sizes || {}).map(Number).filter(s => (p.sizes[s] || 0) > 0)
         .sort((x, y) => Math.abs(x - n) - Math.abs(y - n)).slice(0, 3).sort((x, y) => x - y);
       return { state: "out", stock: 0, near };
     }

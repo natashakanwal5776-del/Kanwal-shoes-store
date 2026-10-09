@@ -25,7 +25,8 @@ const T = {
     other_kids: "This is a Kids size. It is not available here. Please check the Kids section",
     goTo: "Go", added: "Added to cart", remove: "Remove", stockProblem: "Sorry, not enough stock for",
     pickFirst: "Please choose an available size", chooseLang: "Choose your language",
-    sizeGuide: "EU sizes", rights: "All rights reserved", callUs: "Call", items: "items", fillAll: "Please fill all fields"
+    sizeGuide: "EU sizes", rights: "All rights reserved", callUs: "Call", items: "items", fillAll: "Please fill all fields",
+    soldOut: "Sold out", loading: "Loading...", video: "Watch Video"
   },
   ur: {
     brandName: "کنول شوز اسٹور",
@@ -53,7 +54,8 @@ const T = {
     other_kids: "یہ بچوں کا سائز ہے، یہاں دستیاب نہیں ہے۔ براہِ کرم بچوں کا سیکشن دیکھیں",
     goTo: "جائیں", added: "کارٹ میں شامل ہو گیا", remove: "ہٹائیں", stockProblem: "معذرت، اتنا اسٹاک موجود نہیں:",
     pickFirst: "براہِ کرم دستیاب سائز منتخب کریں", chooseLang: "اپنی زبان منتخب کریں",
-    sizeGuide: "EU sizes", rights: "جملہ حقوق محفوظ ہیں", callUs: "کال کریں", items: "اشیاء", fillAll: "برہِ کرم تمام خانے بھریں"
+    sizeGuide: "EU sizes", rights: "جملہ حقوق محفوظ ہیں", callUs: "کال کریں", items: "اشیاء", fillAll: "برہِ کرم تمام خانے بھریں",
+    soldOut: "اسٹاک ختم", loading: "لوڈ ہو رہا ہے...", video: "ویڈیو دیکھیں"
   }
 };
 const TYPE_NAMES = {
